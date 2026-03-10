@@ -9,7 +9,13 @@ export const useSocket = () => {
 };
 
 export const SocketProvider = (props) => {
-  const socket = useMemo(() => io("http://localhost:3000"), []);
+  const socket = useMemo(
+    () =>
+      io("https://5951-49-204-87-250.ngrok-free.app", {
+        transports: ["websocket"],
+      }),
+    []
+  );
 
   return (
     <SocketContext.Provider value={socket}>
