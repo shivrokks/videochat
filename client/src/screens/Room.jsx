@@ -1,3 +1,4 @@
+// Room.jsx
 import React, { useEffect, useCallback, useState } from "react";
 import ReactPlayer from "react-player";
 import peer from "../service/peer";
@@ -14,15 +15,34 @@ const RoomPage = () => {
     setRemoteSocketId(id);
   }, []);
 
-  const handleCallUser = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: true,
-    });
-    const offer = await peer.getOffer();
-    socket.emit("user:call", { to: remoteSocketId, offer });
-    setMyStream(stream);
-  }, [remoteSocketId, socket]);
+  const addTracksIfNeeded = useCallback((stream) => {
+    if (!stream) return;
+    const existingSenders = peer.peer.getSenders() || [];
+    for (const track of stream.getTracks()) {
+      const already = existingSenders.find((s) => s.track && s.track.id === track.id);
+      if (!already) {
+        peer.peer.addTrack(track, stream);
+      }
+    }
+  }, []);
+
+  const handleCallUser = useCallback(
+    async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true,
+      });
+
+      setMyStream(stream);
+
+      // Add tracks BEFORE creating the offer so the offer contains proper m-lines.
+      addTracksIfNeeded(stream);
+
+      const offer = await peer.getOffer();
+      socket.emit("user:call", { to: remoteSocketId, offer });
+    },
+    [remoteSocketId, socket, addTracksIfNeeded]
+  );
 
   const handleIncommingCall = useCallback(
     async ({ from, offer }) => {
@@ -32,23 +52,28 @@ const RoomPage = () => {
         video: true,
       });
       setMyStream(stream);
+
+      // Add tracks BEFORE creating the answer so the answer's m-lines match.
+      addTracksIfNeeded(stream);
+
       console.log(`Incoming Call`, from, offer);
       const ans = await peer.getAnswer(offer);
       socket.emit("call:accepted", { to: from, ans });
     },
-    [socket]
+    [socket, addTracksIfNeeded]
   );
 
   const sendStreams = useCallback(() => {
-    for (const track of myStream.getTracks()) {
-      peer.peer.addTrack(track, myStream);
-    }
-  }, [myStream]);
+    if (!myStream) return;
+    addTracksIfNeeded(myStream);
+  }, [myStream, addTracksIfNeeded]);
 
   const handleCallAccepted = useCallback(
     ({ from, ans }) => {
+      // apply remote answer (method name in peer service sets remote desc)
       peer.setLocalDescription(ans);
       console.log("Call Accepted!");
+      // safe: addTracksIfNeeded will skip duplicate tracks
       sendStreams();
     },
     [sendStreams]
